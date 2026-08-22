@@ -1,7 +1,11 @@
 """
 NLP Parser module.
-Uses a local Ollama model to extract structured user-creation
-parameters from free-form natural language input.
+Sends the user's natural language message to a local Ollama instance
+(or any OpenAI-compatible endpoint) and extracts structured Linux
+user-creation parameters from the JSON response.
+
+The Ollama base URL is passed in at call time so each browser session
+can point to a different Ollama instance.
 """
 
 import json
@@ -12,11 +16,11 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
+DEFAULT_OLLAMA_URL = "http://localhost:11434"
 
 SYSTEM_PROMPT = """You are a Linux system administrator assistant.
 Your ONLY job is to extract user account creation parameters from the user's message
-and return them as a strict JSON object. Do NOT add explanations.
+and return them as a strict JSON object. Do NOT add explanations or any extra text.
 
 Extract the following fields (use null if not mentioned):
 - username       : string  (Linux username, lowercase, no spaces)
@@ -46,78 +50,100 @@ Return ONLY valid JSON like:
 """
 
 
-def query_ollama(model: str, prompt: str) -> str:
-    """Send a prompt to the local Ollama model and return the response text."""
+def _build_ollama_url(base_url: str) -> str:
+    """Normalize the base URL and append the generate path."""
+    base = base_url.rstrip("/")
+    # Support both bare base URL and full path
+    if base.endswith("/api/generate"):
+        return base
+    return f"{base}/api/generate"
+
+
+def query_ollama(model: str, prompt: str, ollama_url: str = DEFAULT_OLLAMA_URL) -> str:
+    """Send a prompt to the Ollama instance and return the response text."""
+    url = _build_ollama_url(ollama_url)
     payload = {
-        "model": model,
+        "model":  model,
         "prompt": prompt,
         "system": SYSTEM_PROMPT,
         "stream": False,
         "options": {
-            "temperature": 0.1,   # Low temperature for deterministic extraction
+            "temperature": 0.1,
             "top_p": 0.9,
         }
     }
-    response = requests.post(OLLAMA_URL, json=payload, timeout=60)
+    response = requests.post(url, json=payload, timeout=90)
     response.raise_for_status()
     return response.json().get("response", "")
 
 
 def extract_json(text: str) -> Optional[dict]:
     """Extract the first JSON object found in a string."""
-    # Try to find a JSON block in the response
     match = re.search(r'\{.*?\}', text, re.DOTALL)
     if match:
         try:
             return json.loads(match.group())
         except json.JSONDecodeError:
             pass
-    # Fallback: try parsing the whole text
     try:
         return json.loads(text.strip())
     except json.JSONDecodeError:
         return None
 
 
-def parse_user_intent(message: str, model: str = "llama3") -> dict:
+def parse_user_intent(message: str,
+                      model: str = "llama3",
+                      ollama_url: str = DEFAULT_OLLAMA_URL) -> dict:
     """
-    Parse a natural language message and extract user creation parameters.
+    Parse natural language and extract Linux user creation parameters.
 
-    Returns a dict with extracted params and a 'parse_error' key if parsing failed.
+    Args:
+        message:    The user's chat message.
+        model:      Ollama model name (e.g. llama3, mistral).
+        ollama_url: Base URL of the Ollama instance for this session.
+
+    Returns a dict with extracted params, or {'parse_error': '...'} on failure.
     """
     try:
-        raw = query_ollama(model, message)
+        raw    = query_ollama(model, message, ollama_url)
         logger.debug(f"Ollama raw response: {raw}")
         params = extract_json(raw)
 
         if not params:
             return {
-                "parse_error": "Could not extract structured data from the response.",
-                "raw_response": raw
+                "parse_error":    "Could not extract structured data from the AI response.",
+                "raw_response":   raw
             }
 
-        # Ensure username is present and valid
         if not params.get("username"):
             return {
-                "parse_error": "No username found in your message. Please specify a username.",
+                "parse_error":  "No username found in your message. Please specify a username.",
                 "raw_response": raw
             }
 
-        # Sanitize username: lowercase, alphanumeric + underscore + hyphen only
+        # Sanitize username
         params["username"] = re.sub(r'[^a-z0-9_\-]', '', params["username"].lower())
+        if not params["username"]:
+            return {"parse_error": "Username became empty after sanitization. Use lowercase letters only."}
 
         # Defaults
-        params.setdefault("create_home", True)
+        params.setdefault("create_home",    True)
         params.setdefault("system_account", False)
-        params.setdefault("shell", "/bin/bash")
-        params.setdefault("groups", [])
+        params.setdefault("shell",          "/bin/bash")
+        params.setdefault("groups",         [])
 
         return params
 
     except requests.ConnectionError:
+        base = ollama_url or DEFAULT_OLLAMA_URL
         return {
-            "parse_error": "Cannot reach Ollama. Make sure Ollama is running on localhost:11434."
+            "parse_error": (
+                f"Cannot reach Ollama at **{base}**. "
+                "Make sure Ollama is running and the URL in SSH Config is correct."
+            )
         }
+    except requests.HTTPError as e:
+        return {"parse_error": f"Ollama returned an error: {e}"}
     except Exception as e:
         logger.exception("NLP parsing failed")
         return {"parse_error": str(e)}

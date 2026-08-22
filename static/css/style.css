@@ -878,3 +878,65 @@ select option { background: var(--bg2); }
   border: 1px solid #f59e0b30;
   border-radius: 6px;
 }
+
+/* ── Config section labels ───────────────────────────────────── */
+.config-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 14px;
+  margin-top: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── Server banner (connected state) ────────────────────────── */
+.server-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #22c55e10;
+  border: 1px solid var(--success)40;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--success);
+  margin-bottom: 20px;
+}
+.server-banner.hidden { display: none; }
+.server-banner svg { flex-shrink: 0; }
+.server-banner span { flex: 1; font-family: var(--mono); font-size: 12px; }
+
+.disconnect-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 1px solid var(--danger)40;
+  color: var(--danger);
+  font-size: 12px;
+  font-family: var(--font);
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--transition);
+  flex-shrink: 0;
+}
+.disconnect-btn:hover { background: #ef444420; border-color: var(--danger); }
+
+/* ── Server tag in chat bubbles ──────────────────────────────── */
+.server-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text3);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  margin: 6px 0 10px;
+}

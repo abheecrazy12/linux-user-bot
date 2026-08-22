@@ -1,6 +1,6 @@
 /* ── State ─────────────────────────────────────────────────────── */
-let pendingParams = null;   // params waiting for user confirmation
-let isWaiting     = false;  // prevent double-sends
+let pendingParams = null;
+let isWaiting     = false;
 
 /* ── Init ──────────────────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', () => {
@@ -11,23 +11,35 @@ document.addEventListener('DOMContentLoaded', () => {
   // Mobile sidebar overlay close
   document.addEventListener('click', e => {
     const sidebar = document.getElementById('sidebar');
-    const menuBtn  = document.getElementById('menuBtn');
+    const menuBtn = document.getElementById('menuBtn');
     if (sidebar.classList.contains('open') &&
         !sidebar.contains(e.target) &&
         !menuBtn.contains(e.target)) {
       sidebar.classList.remove('open');
     }
   });
+
+  // Drag-and-drop for key file
+  const zone = document.getElementById('keyDropZone');
+  if (zone) {
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', e => {
+      e.preventDefault();
+      zone.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file) uploadKeyFile(file);
+    });
+  }
 });
 
 /* ── Panel switching ───────────────────────────────────────────── */
 function showPanel(name) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('panel' + name.charAt(0).toUpperCase() + name.slice(1)).classList.add('active');
-  document.getElementById('nav'   + name.charAt(0).toUpperCase() + name.slice(1)).classList.add('active');
-
-  // Close mobile sidebar after navigation
+  const cap = name.charAt(0).toUpperCase() + name.slice(1);
+  document.getElementById('panel' + cap)?.classList.add('active');
+  document.getElementById('nav'   + cap)?.classList.add('active');
   document.getElementById('sidebar').classList.remove('open');
 }
 
@@ -47,15 +59,22 @@ async function checkSSHStatus() {
     const dot  = document.getElementById('statusDot');
     const txt  = document.getElementById('statusText');
     const mDot = document.getElementById('mobileStatusDot');
+    const banner     = document.getElementById('serverBanner');
+    const bannerText = document.getElementById('serverBannerText');
 
     if (data.configured) {
       dot.className  = 'dot online';
       mDot.className = 'dot-sm online';
       txt.textContent = data.ssh_host || 'Connected';
+      if (banner) {
+        banner.classList.remove('hidden');
+        bannerText.textContent = `Connected to: ${data.ssh_user}@${data.ssh_host}:${data.ssh_port}`;
+      }
     } else {
       dot.className  = 'dot offline';
       mDot.className = 'dot-sm';
       txt.textContent = 'Not configured';
+      if (banner) banner.classList.add('hidden');
     }
   } catch {
     document.getElementById('statusText').textContent = 'Offline';
@@ -67,16 +86,20 @@ async function loadConfig() {
   try {
     const res  = await fetch('/api/config');
     const data = await res.json();
-    document.getElementById('cfgHost').value  = data.ssh_host  || '';
-    document.getElementById('cfgPort').value  = data.ssh_port  || '22';
-    document.getElementById('cfgUser').value  = data.ssh_user  || '';
-    document.getElementById('cfgModel').value = data.ollama_model || 'llama3';
+    document.getElementById('cfgHost').value      = data.ssh_host    || '';
+    document.getElementById('cfgPort').value      = data.ssh_port    || '22';
+    document.getElementById('cfgUser').value      = data.ssh_user    || '';
+    document.getElementById('cfgModel').value     = data.ollama_model || 'llama3';
+    document.getElementById('cfgOllamaUrl').value = data.ollama_url  || 'http://localhost:11434';
+
     if (data.auth_type === 'key') {
       switchAuth('key');
       if (data.key_uploaded) {
-        // Show the "already uploaded" state
-        document.getElementById('keyFileLabel').textContent = 'Key already loaded (from previous session)';
+        document.getElementById('keyFileLabel').textContent = 'Key already loaded in this session';
         document.getElementById('keyDropZone').classList.add('has-file');
+        document.getElementById('keyFileStatus').classList.remove('hidden');
+        document.getElementById('keyFileName').textContent = 'key loaded';
+        document.querySelector('.file-upload-inner').style.display = 'none';
       }
     }
   } catch {}
@@ -86,18 +109,23 @@ async function saveConfig() {
   const btn = event.currentTarget;
   btn.disabled = true;
 
+  const isKeyAuth = document.getElementById('tabKey').classList.contains('active');
   const body = {
     ssh_host:     document.getElementById('cfgHost').value.trim(),
     ssh_port:     parseInt(document.getElementById('cfgPort').value) || 22,
     ssh_user:     document.getElementById('cfgUser').value.trim(),
-    ssh_password: document.getElementById('cfgPassword').value,
-    ssh_key_path: '',   // no longer used — key is uploaded separately
+    ssh_password: isKeyAuth ? '' : document.getElementById('cfgPassword').value,
+    ollama_url:   document.getElementById('cfgOllamaUrl').value.trim() || 'http://localhost:11434',
     ollama_model: document.getElementById('cfgModel').value,
-    auth_type:    document.getElementById('tabKey').classList.contains('active') ? 'key' : 'password',
+    auth_type:    isKeyAuth ? 'key' : 'password',
   };
 
   try {
-    const res  = await fetch('/api/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const res  = await fetch('/api/config', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify(body)
+    });
     const data = await res.json();
     showFeedback('configFeedback', 'success', data.message);
     checkSSHStatus();
@@ -114,17 +142,22 @@ async function testSSH() {
   btn.disabled = true;
   showFeedback('configFeedback', 'loading', 'Testing SSH connection…');
 
-  // Save first so test uses latest values
+  // Save current values first so the test uses them
+  const isKeyAuth = document.getElementById('tabKey').classList.contains('active');
   const body = {
     ssh_host:     document.getElementById('cfgHost').value.trim(),
     ssh_port:     parseInt(document.getElementById('cfgPort').value) || 22,
     ssh_user:     document.getElementById('cfgUser').value.trim(),
-    ssh_password: document.getElementById('cfgPassword').value,
-    ssh_key_path: '',
+    ssh_password: isKeyAuth ? '' : document.getElementById('cfgPassword').value,
+    ollama_url:   document.getElementById('cfgOllamaUrl').value.trim() || 'http://localhost:11434',
     ollama_model: document.getElementById('cfgModel').value,
-    auth_type:    document.getElementById('tabKey').classList.contains('active') ? 'key' : 'password',
+    auth_type:    isKeyAuth ? 'key' : 'password',
   };
-  await fetch('/api/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  await fetch('/api/config', {
+    method:  'POST',
+    headers: {'Content-Type': 'application/json'},
+    body:    JSON.stringify(body)
+  });
 
   try {
     const res  = await fetch('/api/test-ssh', { method: 'POST' });
@@ -139,6 +172,26 @@ async function testSSH() {
     showFeedback('configFeedback', 'error', 'Request failed: ' + e.message);
   } finally {
     btn.disabled = false;
+  }
+}
+
+async function disconnectServer() {
+  try {
+    await fetch('/api/config/clear', { method: 'POST' });
+    // Reset all config form fields
+    document.getElementById('cfgHost').value      = '';
+    document.getElementById('cfgPort').value      = '22';
+    document.getElementById('cfgUser').value      = '';
+    document.getElementById('cfgPassword').value  = '';
+    document.getElementById('cfgOllamaUrl').value = 'http://localhost:11434';
+    clearKeyFile();
+    switchAuth('password');
+    document.getElementById('configFeedback').innerHTML = '';
+    checkSSHStatus();
+    showToast('Disconnected from server', 'success');
+    showPanel('config');
+  } catch (e) {
+    showToast('Disconnect failed: ' + e.message, 'error');
   }
 }
 
@@ -193,27 +246,18 @@ async function uploadKeyFile(file) {
 }
 
 function clearKeyFile() {
-  document.getElementById('cfgKeyFile').value = '';
-  document.getElementById('keyFileStatus').classList.add('hidden');
-  document.getElementById('keyDropZone').classList.remove('has-file', 'uploading');
-  document.querySelector('.file-upload-inner').style.display = '';
-  document.getElementById('keyFileLabel').textContent = 'Click to upload or drag & drop';
-  showFeedback('configFeedback', 'info', 'Key removed. You can upload a new one.');
-}
+  const fileInput = document.getElementById('cfgKeyFile');
+  const status    = document.getElementById('keyFileStatus');
+  const zone      = document.getElementById('keyDropZone');
+  const inner     = document.querySelector('.file-upload-inner');
+  const label     = document.getElementById('keyFileLabel');
 
-// Drag-and-drop support
-document.addEventListener('DOMContentLoaded', () => {
-  const zone = document.getElementById('keyDropZone');
-  if (!zone) return;
-  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
-  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-  zone.addEventListener('drop', e => {
-    e.preventDefault();
-    zone.classList.remove('drag-over');
-    const file = e.dataTransfer.files[0];
-    if (file) uploadKeyFile(file);
-  });
-});
+  if (fileInput) fileInput.value = '';
+  if (status)    status.classList.add('hidden');
+  if (zone)      zone.classList.remove('has-file', 'uploading');
+  if (inner)     inner.style.display = '';
+  if (label)     label.textContent = 'Click to upload or drag & drop';
+}
 
 function togglePw(id, btn) {
   const input = document.getElementById(id);
@@ -257,7 +301,7 @@ async function sendMessage() {
   try {
     const res  = await fetch('/api/chat', {
       method:  'POST',
-      headers: {'Content-Type':'application/json'},
+      headers: {'Content-Type': 'application/json'},
       body:    JSON.stringify({ message: text, stage: 'parse' })
     });
     const data = await res.json();
@@ -297,7 +341,7 @@ async function confirmExecution() {
   try {
     const res  = await fetch('/api/chat', {
       method:  'POST',
-      headers: {'Content-Type':'application/json'},
+      headers: {'Content-Type': 'application/json'},
       body:    JSON.stringify({ stage: 'execute', params: pendingParams, message: '' })
     });
     const data = await res.json();
@@ -367,12 +411,17 @@ function appendConfirmMessage(data) {
     .map(c => `<div class="cmd-line">${escHtml(c)}</div>`)
     .join('');
 
+  const serverTag = data.server
+    ? `<div class="server-tag"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>${escHtml(data.server)}</div>`
+    : '';
+
   div.innerHTML = `
     <div class="avatar bot-avatar">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/><circle cx="12" cy="16" r="1"/></svg>
     </div>
     <div class="bubble">
       <p><strong>${escHtml(data.message)}</strong></p>
+      ${serverTag}
       <div class="desc-list">${descHtml}</div>
       <div class="cmd-preview">
         <div class="cmd-preview-header">Commands to execute</div>
@@ -403,7 +452,6 @@ function appendSuccessMessage(data) {
     .map(d => `<p>${escHtml(d)}</p>`)
     .join('');
 
-  // PPK download button — only shown when keypair was generated
   const ppkHtml = data.ppk_available ? `
     <div class="ppk-download-wrap">
       <div class="ppk-info">
@@ -413,11 +461,13 @@ function appendSuccessMessage(data) {
           <p class="ppk-hint">Download and open in PuTTY / WinSCP to connect as <strong>${escHtml(data.ppk_username)}</strong></p>
         </div>
       </div>
-      <a class="btn btn-primary btn-sm ppk-btn" href="/api/download-ppk/${encodeURIComponent(data.ppk_username)}" download="${escHtml(data.ppk_username)}.ppk">
+      <a class="btn btn-primary btn-sm ppk-btn"
+         href="/api/download-ppk/${encodeURIComponent(data.ppk_username)}"
+         download="${escHtml(data.ppk_username)}.ppk">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Download ${escHtml(data.ppk_username)}.ppk
       </a>
-      <p class="ppk-warning">⚠️ One-time download — save it securely. The server copy of the private key has been deleted.</p>
+      <p class="ppk-warning">⚠️ One-time download — save it securely. The private key has been deleted from the server.</p>
     </div>` : '';
 
   div.innerHTML = `
@@ -464,7 +514,7 @@ function removeConfirmButtons() {
 /* ── Helpers ───────────────────────────────────────────────────── */
 function setWaiting(state) {
   isWaiting = state;
-  document.getElementById('sendBtn').disabled  = state;
+  document.getElementById('sendBtn').disabled   = state;
   document.getElementById('chatInput').disabled = state;
 }
 
@@ -474,21 +524,19 @@ function scrollBottom() {
 }
 
 function clearChat() {
-  const wrap = document.getElementById('messages');
-  wrap.innerHTML = '';
+  document.getElementById('messages').innerHTML = '';
   pendingParams = null;
   appendBotMessage('Chat cleared. What user would you like to create?');
 }
 
 function escHtml(s) {
   return String(s)
-    .replace(/&/g,'&amp;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;');
+    .replace(/&/g,  '&amp;')
+    .replace(/</g,  '&lt;')
+    .replace(/>/g,  '&gt;')
+    .replace(/"/g,  '&quot;');
 }
 
-/** Minimal markdown: **bold**, `code` */
 function markdownLite(s) {
   return s
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
