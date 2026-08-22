@@ -184,24 +184,21 @@
         </div>
       </div>
 
-      <!-- AI / Ollama section -->
-      <div class="config-section-label" style="margin-top:8px;">AI / Ollama Settings</div>
+      <!-- AI / Gemini section -->
+      <div class="config-section-label" style="margin-top:8px;">AI Settings — Google Gemini</div>
       <div class="form-grid">
         <div class="form-group full">
-          <label>Ollama Base URL <span class="label-hint">— URL where Ollama is running</span></label>
-          <input type="text" id="cfgOllamaUrl" placeholder="http://localhost:11434" value="http://localhost:11434" />
-        </div>
-        <div class="form-group full">
-          <label>Model</label>
-          <select id="cfgModel">
-            <option value="llama3">llama3 (recommended)</option>
-            <option value="llama3.1">llama3.1</option>
-            <option value="llama3.2">llama3.2</option>
-            <option value="mistral">mistral</option>
-            <option value="mixtral">mixtral</option>
-            <option value="gemma2">gemma2</option>
-            <option value="phi3">phi3</option>
-          </select>
+          <label>
+            Gemini API Key
+            <span class="label-hint">— free at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent)">aistudio.google.com</a></span>
+          </label>
+          <div class="pw-wrap">
+            <input type="password" id="cfgGeminiKey" placeholder="AIza..." autocomplete="off" />
+            <button class="pw-toggle" onclick="togglePw('cfgGeminiKey', this)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+          <p class="field-hint" id="geminiKeyHint"></p>
         </div>
       </div>
 
@@ -273,11 +270,13 @@
       </div>
 
       <div class="help-section">
-        <h3>Ollama Setup</h3>
-        <p>This app uses a local Ollama model. Make sure Ollama is running:</p>
-        <div class="code-block"><code>ollama serve
-ollama pull llama3</code></div>
-        <p style="margin-top:12px">If Ollama is on a different machine or exposed via ngrok, enter its URL in <strong>SSH Config → Ollama Base URL</strong>.</p>
+        <h3>AI — Google Gemini (Free)</h3>
+        <p>This app uses Google Gemini for natural language understanding. It's completely free — no credit card needed.</p>
+        <div class="param-table" style="margin-top:10px">
+          <div class="param-row"><span class="param-name">Free limit</span><span>1500 requests/day, 15/minute</span></div>
+          <div class="param-row"><span class="param-name">Get key</span><span>aistudio.google.com/apikey</span></div>
+          <div class="param-row"><span class="param-name">No key?</span><span>Rule-based parser is used as fallback</span></div>
+        </div>
       </div>
 
       <div class="help-section">

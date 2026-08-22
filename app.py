@@ -77,14 +77,13 @@ def api_config():
     """Return current session config (no secrets echoed back)."""
     cfg = get_session_cfg()
     return jsonify({
-        "ssh_host":     cfg.get("ssh_host", ""),
-        "ssh_port":     cfg.get("ssh_port", "22"),
-        "ssh_user":     cfg.get("ssh_user", ""),
-        "auth_type":    "key" if cfg.get("ssh_key_content") else "password",
-        "key_uploaded": bool(cfg.get("ssh_key_content")),
-        "ollama_url":   cfg.get("ollama_url", "http://localhost:11434"),
-        "ollama_model": cfg.get("ollama_model", "llama3"),
-        "configured":   session_ssh_configured(),
+        "ssh_host":        cfg.get("ssh_host", ""),
+        "ssh_port":        cfg.get("ssh_port", "22"),
+        "ssh_user":        cfg.get("ssh_user", ""),
+        "auth_type":       "key" if cfg.get("ssh_key_content") else "password",
+        "key_uploaded":    bool(cfg.get("ssh_key_content")),
+        "gemini_key_set":  bool(cfg.get("gemini_api_key") or os.getenv("GEMINI_API_KEY")),
+        "configured":      session_ssh_configured(),
     })
 
 
@@ -94,20 +93,19 @@ def api_config_update():
     data = request.get_json(force=True)
     cfg  = get_session_cfg()
 
-    # Update only provided fields — preserve existing key_content unless
-    # the user explicitly switched to password auth
-    cfg["ssh_host"]     = data.get("ssh_host", cfg.get("ssh_host", "")).strip()
-    cfg["ssh_port"]     = str(data.get("ssh_port", cfg.get("ssh_port", 22)))
-    cfg["ssh_user"]     = data.get("ssh_user", cfg.get("ssh_user", "")).strip()
-    cfg["ollama_url"]   = data.get("ollama_url",   cfg.get("ollama_url",   "http://localhost:11434")).strip()
-    cfg["ollama_model"] = data.get("ollama_model", cfg.get("ollama_model", "llama3"))
+    cfg["ssh_host"] = data.get("ssh_host", cfg.get("ssh_host", "")).strip()
+    cfg["ssh_port"] = str(data.get("ssh_port", cfg.get("ssh_port", 22)))
+    cfg["ssh_user"] = data.get("ssh_user", cfg.get("ssh_user", "")).strip()
+
+    # Store Gemini API key in session only if provided (don't overwrite with empty)
+    if data.get("gemini_api_key", "").strip():
+        cfg["gemini_api_key"] = data["gemini_api_key"].strip()
 
     if data.get("auth_type") == "password":
-        cfg["ssh_password"]   = data.get("ssh_password", "")
-        cfg["ssh_key_content"] = None   # clear uploaded key
+        cfg["ssh_password"]    = data.get("ssh_password", "")
+        cfg["ssh_key_content"] = None
     elif data.get("auth_type") == "key":
         cfg["ssh_password"] = None
-        # key_content is set separately via /api/config/upload-key
 
     set_session_cfg(cfg)
     return jsonify({"status": "ok", "message": "Configuration saved for this session."})
@@ -177,15 +175,14 @@ def api_chat():
     params  = data.get("params", {})
     cfg     = get_session_cfg()
 
-    model       = cfg.get("ollama_model", "llama3")
-    ollama_url  = cfg.get("ollama_url",   "http://localhost:11434")
+    api_key = cfg.get("gemini_api_key", os.getenv("GEMINI_API_KEY", ""))
 
     if not message and stage == "parse":
         return jsonify({"error": "Empty message."}), 400
 
     # ── Stage 1: Parse ────────────────────────────────────────────────────────
     if stage == "parse":
-        parsed = parse_user_intent(message, model=model, ollama_url=ollama_url)
+        parsed = parse_user_intent(message, api_key=api_key)
 
         if "parse_error" in parsed:
             return jsonify({

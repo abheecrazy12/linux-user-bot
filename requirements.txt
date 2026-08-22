@@ -4,3 +4,4 @@ paramiko==3.4.0
 python-dotenv==1.0.1
 requests==2.32.3
 gunicorn==22.0.0
+# google-generativeai not needed — we call Gemini REST API directly via requests
