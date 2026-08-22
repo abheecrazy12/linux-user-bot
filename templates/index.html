@@ -184,21 +184,13 @@
         </div>
       </div>
 
-      <!-- AI / Gemini section -->
-      <div class="config-section-label" style="margin-top:8px;">AI Settings — Google Gemini</div>
-      <div class="form-grid">
-        <div class="form-group full">
-          <label>
-            Gemini API Key
-            <span class="label-hint">— free at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent)">aistudio.google.com</a></span>
-          </label>
-          <div class="pw-wrap">
-            <input type="password" id="cfgGeminiKey" placeholder="AIza..." autocomplete="off" />
-            <button class="pw-toggle" onclick="togglePw('cfgGeminiKey', this)">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            </button>
-          </div>
-          <p class="field-hint" id="geminiKeyHint"></p>
+      <!-- AI section — Gemini is pre-configured, no key needed from user -->
+      <div class="config-section-label" style="margin-top:8px;">AI Settings</div>
+      <div class="ai-status-badge">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <div>
+          <p class="ai-status-title">Google Gemini — Active ✅</p>
+          <p class="ai-status-hint">Free AI model pre-configured. No setup needed.</p>
         </div>
       </div>
 

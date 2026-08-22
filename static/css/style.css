@@ -948,3 +948,19 @@ select option { background: var(--bg2); }
   min-height: 16px;
   color: var(--text3);
 }
+
+/* ── AI status badge in config panel ────────────────────────── */
+.ai-status-badge {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #6366f110;
+  border: 1px solid var(--accent)30;
+  border-radius: var(--radius-sm);
+  margin-bottom: 20px;
+  color: var(--accent);
+}
+.ai-status-badge svg { flex-shrink: 0; margin-top: 2px; }
+.ai-status-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.ai-status-hint  { font-size: 12px; color: var(--text3); margin-top: 2px; }

@@ -1,13 +1,14 @@
 """
-SSH Keypair generation and PPK conversion utilities.
-
-Generates an RSA keypair on the remote Linux server for a new user,
-installs the public key into their ~/.ssh/authorized_keys,
-then downloads the private key and converts it to PuTTY PPK format
-so the end-user can load it directly into PuTTY / WinSCP.
+SSH Keypair generation and PPK v2 conversion.
+Generates RSA keypair on the remote server, installs authorized_keys,
+converts private key to PuTTY PPK v2 format for download.
 """
 
 import io
+import base64
+import hashlib
+import hmac
+import struct
 import logging
 from paramiko import RSAKey
 
@@ -16,153 +17,141 @@ logger = logging.getLogger(__name__)
 
 def generate_keypair_on_server(ssh_client, username: str) -> dict:
     """
-    Generates a 4096-bit RSA keypair for `username` on the remote server.
-    Sets up ~/.ssh with correct permissions and installs authorized_keys.
+    Generate a 4096-bit RSA keypair for `username` on the remote server.
+    Installs public key into ~/.ssh/authorized_keys.
+    Deletes private key from server after reading — user downloads the PPK.
 
     Returns:
-        {
-            "success": bool,
-            "private_key_pem": str,   # OpenSSH PEM text
-            "public_key": str,        # authorized_keys line
-            "error": str              # only on failure
-        }
+        {"success": True,  "private_key_pem": str, "public_key": str}
+        {"success": False, "error": str}
     """
-    home = f"/home/{username}"
-    ssh_dir = f"{home}/.ssh"
+    ssh_dir = f"/home/{username}/.ssh"
 
-    commands = [
-        # Create .ssh dir owned by the user
+    steps = [
         f"sudo mkdir -p {ssh_dir}",
         f"sudo chown {username}:{username} {ssh_dir}",
         f"sudo chmod 700 {ssh_dir}",
-        # Generate keypair (no passphrase, RSA 4096)
         f"sudo ssh-keygen -t rsa -b 4096 -N '' -f {ssh_dir}/id_rsa -C '{username}@server'",
-        # Install public key as authorized_keys
         f"sudo cp {ssh_dir}/id_rsa.pub {ssh_dir}/authorized_keys",
         f"sudo chown {username}:{username} {ssh_dir}/authorized_keys {ssh_dir}/id_rsa {ssh_dir}/id_rsa.pub",
         f"sudo chmod 600 {ssh_dir}/authorized_keys {ssh_dir}/id_rsa",
         f"sudo chmod 644 {ssh_dir}/id_rsa.pub",
     ]
 
-    for cmd in commands:
+    for cmd in steps:
         code, out, err = ssh_client.execute(cmd)
         if code != 0:
-            return {"success": False, "error": f"Command failed: {cmd}\n{err or out}"}
+            return {"success": False, "error": f"Failed: {cmd}\n{err or out}"}
 
-    # Read the private key back from the server
-    code, private_key_pem, err = ssh_client.execute(f"sudo cat {ssh_dir}/id_rsa")
-    if code != 0 or not private_key_pem.strip():
+    # Read private key
+    code, pem, err = ssh_client.execute(f"sudo cat {ssh_dir}/id_rsa")
+    if code != 0 or not pem.strip():
         return {"success": False, "error": f"Could not read private key: {err}"}
 
-    code, public_key, err = ssh_client.execute(f"sudo cat {ssh_dir}/id_rsa.pub")
-    if code != 0:
-        return {"success": False, "error": f"Could not read public key: {err}"}
+    # Read public key
+    code, pub, _ = ssh_client.execute(f"sudo cat {ssh_dir}/id_rsa.pub")
 
-    # Remove the private key from server — user will use the downloaded PPK
+    # Delete private key from server — only PPK goes to the user
     ssh_client.execute(f"sudo rm -f {ssh_dir}/id_rsa")
 
+    logger.info(f"SSH keypair generated for {username}")
     return {
-        "success": True,
-        "private_key_pem": private_key_pem.strip(),
-        "public_key": public_key.strip(),
+        "success":         True,
+        "private_key_pem": pem.strip(),
+        "public_key":      pub.strip(),
     }
+
+
+# ── PPK v2 helpers ────────────────────────────────────────────────────────────
+
+def _mpint(n: int) -> bytes:
+    """Encode a Python int as an SSH mpint (big-endian, length-prefixed)."""
+    if n == 0:
+        return struct.pack('>I', 0)
+    byte_len = (n.bit_length() + 7) // 8
+    raw = n.to_bytes(byte_len, 'big')
+    if raw[0] & 0x80:          # needs sign byte
+        raw = b'\x00' + raw
+    return struct.pack('>I', len(raw)) + raw
+
+
+def _ssh_string(s: bytes) -> bytes:
+    """Encode bytes as an SSH string (uint32 length + data)."""
+    return struct.pack('>I', len(s)) + s
+
+
+def _wrap64(s: str) -> str:
+    """Wrap a base64 string at 64 characters per line (PuTTY convention)."""
+    return '\n'.join(s[i:i + 64] for i in range(0, len(s), 64))
 
 
 def pem_to_ppk(pem_text: str) -> bytes:
     """
-    Convert an OpenSSH PEM private key string to PuTTY PPK v2 format bytes.
-    Uses paramiko's RSAKey which can read PEM and write PPK.
+    Convert an OpenSSH PEM private key to PuTTY PPK v2 format.
+    The result can be loaded directly into PuTTY, WinSCP, or FileZilla.
     """
-    # Load the PEM key via paramiko
-    key_file = io.StringIO(pem_text)
-    rsa_key = RSAKey.from_private_key(key_file)
+    # Load key via paramiko
+    rsa_key = RSAKey.from_private_key(io.StringIO(pem_text))
 
-    # Write it out in PPK format to a BytesIO buffer
-    ppk_buf = io.StringIO()
-    rsa_key.write_private_key(ppk_buf)          # paramiko writes OpenSSH format
+    # Extract key numbers
+    pub_nums  = rsa_key.public_numbers                   # n, e
+    priv_nums = rsa_key.key.private_numbers()            # d, p, q, dmp1, dmq1, iqmp
 
-    # paramiko doesn't natively write PPK v2 — we build it manually from the key material
-    # PPK v2 format used by PuTTY (no passphrase)
-    return _build_ppk_v2(rsa_key)
-
-
-def _build_ppk_v2(rsa_key: RSAKey) -> bytes:
-    """
-    Build a PuTTY PPK v2 file from a paramiko RSAKey.
-    Format reference: https://the.earth.li/~sgtatham/putty/0.81/htmldoc/AppendixC.html
-    """
-    import base64
-    import hashlib
-    import hmac
-    import struct
-
-    # ── Extract raw key components ───────────────────────────────
-    pub_key = rsa_key.public_blob          # SSH wire format of public key
-    # Private key in SSH wire format: n, e, d, p, q, iqmp
-    # Build public blob: "ssh-rsa" + e + n  (standard SSH format)
-    def mpint(n: int) -> bytes:
-        """Encode integer as SSH mpint."""
-        b = n.to_bytes((n.bit_length() + 7) // 8, 'big')
-        if b[0] & 0x80:
-            b = b'\x00' + b
-        return struct.pack('>I', len(b)) + b
-
-    def string(s: bytes) -> bytes:
-        return struct.pack('>I', len(s)) + s
-
-    n = rsa_key.public_numbers.n
-    e = rsa_key.public_numbers.e
-    d = rsa_key.key.private_numbers().d
-    p = rsa_key.key.private_numbers().p
-    q = rsa_key.key.private_numbers().q
-    # PuTTY uses u = p^-1 mod q  (iqmp in PuTTY convention: inverse of p mod q)
-    iqmp = rsa_key.key.private_numbers().iqmp  # = q^-1 mod p in OpenSSH
-
-    # PPK public blob: ssh-rsa wire format
-    pub_blob = string(b"ssh-rsa") + mpint(e) + mpint(n)
-
-    # PPK private blob: d, p, q, iqmp  (PuTTY order)
-    # Note: PuTTY's iqmp = inverse(q, p), OpenSSH iqmp = inverse(p, q)
-    # We recalculate PuTTY's version:
+    n    = pub_nums.n
+    e    = pub_nums.e
+    d    = priv_nums.d
+    p    = priv_nums.p
+    q    = priv_nums.q
+    # PuTTY wants: inverse(q, p)  — OpenSSH stores inverse(p, q)
     putty_iqmp = pow(q, -1, p)
-    priv_blob = mpint(d) + mpint(p) + mpint(q) + mpint(putty_iqmp)
 
-    # ── MAC computation ──────────────────────────────────────────
-    # PPK v2 MAC = HMAC-SHA1 over:
-    #   string("ssh-rsa") + string("aes256-cbc" or "none") +
-    #   string("") + uint32(pub_len) + pub_blob +
-    #   uint32(priv_len) + priv_blob
-    algo      = b"ssh-rsa"
-    enc       = b"none"
-    comment   = b""
-    mac_data  = (string(algo) + string(enc) + string(comment) +
-                 string(pub_blob) + string(priv_blob))
-
-    # MAC key = SHA1("putty-private-key-file-mac-key")
-    mac_key = hashlib.sha1(b"putty-private-key-file-mac-key").digest()
-    mac     = hmac.new(mac_key, mac_data, hashlib.sha1).hexdigest()
-
-    # ── Assemble PPK text file ───────────────────────────────────
-    pub_b64  = base64.b64encode(pub_blob).decode()
-    priv_b64 = base64.b64encode(priv_blob).decode()
-
-    # Wrap base64 at 64 chars per line
-    def wrap64(s: str) -> str:
-        return '\n'.join(s[i:i+64] for i in range(0, len(s), 64))
-
-    pub_lines  = wrap64(pub_b64)
-    priv_lines = wrap64(priv_b64)
-    pub_count  = len(pub_lines.splitlines())
-    priv_count = len(priv_lines.splitlines())
-
-    ppk = (
-        f"PuTTY-User-Key-File-2: ssh-rsa\n"
-        f"Encryption: none\n"
-        f"Comment: imported-key\n"
-        f"Public-Lines: {pub_count}\n"
-        f"{pub_lines}\n"
-        f"Private-Lines: {priv_count}\n"
-        f"{priv_lines}\n"
-        f"Private-MAC: {mac}\n"
+    # ── Public blob: ssh-rsa wire format ──────────────────────────
+    pub_blob = (
+        _ssh_string(b"ssh-rsa") +
+        _mpint(e) +
+        _mpint(n)
     )
+
+    # ── Private blob: d, p, q, iqmp ──────────────────────────────
+    priv_blob = (
+        _mpint(d) +
+        _mpint(p) +
+        _mpint(q) +
+        _mpint(putty_iqmp)
+    )
+
+    # ── PPK v2 MAC ────────────────────────────────────────────────
+    # HMAC-SHA1 over: algo + encryption + comment + pub_blob + priv_blob
+    algo    = b"ssh-rsa"
+    enc     = b"none"
+    comment = b"imported-key"
+
+    mac_data = (
+        _ssh_string(algo) +
+        _ssh_string(enc) +
+        _ssh_string(comment) +
+        _ssh_string(pub_blob) +
+        _ssh_string(priv_blob)
+    )
+
+    mac_key = hashlib.sha1(b"putty-private-key-file-mac-key").digest()
+    mac_hex = hmac.new(mac_key, mac_data, hashlib.sha1).hexdigest()
+
+    # ── Assemble PPK file text ─────────────────────────────────────
+    pub_b64   = base64.b64encode(pub_blob).decode()
+    priv_b64  = base64.b64encode(priv_blob).decode()
+    pub_lines = _wrap64(pub_b64).splitlines()
+    priv_lines= _wrap64(priv_b64).splitlines()
+
+    ppk = "\r\n".join([
+        "PuTTY-User-Key-File-2: ssh-rsa",
+        "Encryption: none",
+        f"Comment: {comment.decode()}",
+        f"Public-Lines: {len(pub_lines)}",
+        *pub_lines,
+        f"Private-Lines: {len(priv_lines)}",
+        *priv_lines,
+        f"Private-MAC: {mac_hex}",
+        "",    # trailing newline
+    ])
     return ppk.encode("utf-8")

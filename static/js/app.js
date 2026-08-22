@@ -86,16 +86,9 @@ async function loadConfig() {
   try {
     const res  = await fetch('/api/config');
     const data = await res.json();
-    document.getElementById('cfgHost').value  = data.ssh_host || '';
-    document.getElementById('cfgPort').value  = data.ssh_port || '22';
-    document.getElementById('cfgUser').value  = data.ssh_user || '';
-
-    // Show hint if Gemini key is already set in session/env
-    if (data.gemini_key_set) {
-      document.getElementById('geminiKeyHint').textContent = '✅ Gemini API key is active';
-      document.getElementById('geminiKeyHint').style.color = 'var(--success)';
-    }
-
+    document.getElementById('cfgHost').value = data.ssh_host || '';
+    document.getElementById('cfgPort').value = data.ssh_port || '22';
+    document.getElementById('cfgUser').value = data.ssh_user || '';
     if (data.auth_type === 'key') {
       switchAuth('key');
       if (data.key_uploaded) {
@@ -115,12 +108,11 @@ async function saveConfig() {
 
   const isKeyAuth = document.getElementById('tabKey').classList.contains('active');
   const body = {
-    ssh_host:       document.getElementById('cfgHost').value.trim(),
-    ssh_port:       parseInt(document.getElementById('cfgPort').value) || 22,
-    ssh_user:       document.getElementById('cfgUser').value.trim(),
-    ssh_password:   isKeyAuth ? '' : document.getElementById('cfgPassword').value,
-    gemini_api_key: document.getElementById('cfgGeminiKey').value.trim(),
-    auth_type:      isKeyAuth ? 'key' : 'password',
+    ssh_host:     document.getElementById('cfgHost').value.trim(),
+    ssh_port:     parseInt(document.getElementById('cfgPort').value) || 22,
+    ssh_user:     document.getElementById('cfgUser').value.trim(),
+    ssh_password: isKeyAuth ? '' : document.getElementById('cfgPassword').value,
+    auth_type:    isKeyAuth ? 'key' : 'password',
   };
 
   try {
@@ -131,12 +123,6 @@ async function saveConfig() {
     });
     const data = await res.json();
     showFeedback('configFeedback', 'success', data.message);
-    // Update Gemini key hint
-    if (body.gemini_api_key) {
-      document.getElementById('geminiKeyHint').textContent = '✅ Gemini API key saved';
-      document.getElementById('geminiKeyHint').style.color = 'var(--success)';
-      document.getElementById('cfgGeminiKey').value = ''; // clear field for security
-    }
     checkSSHStatus();
     showToast('Configuration saved', 'success');
   } catch (e) {
@@ -151,15 +137,12 @@ async function testSSH() {
   btn.disabled = true;
   showFeedback('configFeedback', 'loading', 'Testing SSH connection…');
 
-  // Save current values first so the test uses them
   const isKeyAuth = document.getElementById('tabKey').classList.contains('active');
   const body = {
     ssh_host:     document.getElementById('cfgHost').value.trim(),
     ssh_port:     parseInt(document.getElementById('cfgPort').value) || 22,
     ssh_user:     document.getElementById('cfgUser').value.trim(),
     ssh_password: isKeyAuth ? '' : document.getElementById('cfgPassword').value,
-    ollama_url:   document.getElementById('cfgOllamaUrl').value.trim() || 'http://localhost:11434',
-    ollama_model: document.getElementById('cfgModel').value,
     auth_type:    isKeyAuth ? 'key' : 'password',
   };
   await fetch('/api/config', {

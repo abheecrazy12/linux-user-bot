@@ -21,6 +21,9 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
+# Gemini API key — hardcoded so users never need to enter it
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyAQ.Ab8RN6IWaMHrvSJ47IkFgeaIXfHPRGo1IOI1qiVKpja1mPjtTg")
+
 app = Flask(__name__)
 # Secret key encrypts the session cookie — set a strong value in env for production
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-in-production-!!!")
@@ -82,7 +85,6 @@ def api_config():
         "ssh_user":        cfg.get("ssh_user", ""),
         "auth_type":       "key" if cfg.get("ssh_key_content") else "password",
         "key_uploaded":    bool(cfg.get("ssh_key_content")),
-        "gemini_key_set":  bool(cfg.get("gemini_api_key") or os.getenv("GEMINI_API_KEY")),
         "configured":      session_ssh_configured(),
     })
 
@@ -96,10 +98,6 @@ def api_config_update():
     cfg["ssh_host"] = data.get("ssh_host", cfg.get("ssh_host", "")).strip()
     cfg["ssh_port"] = str(data.get("ssh_port", cfg.get("ssh_port", 22)))
     cfg["ssh_user"] = data.get("ssh_user", cfg.get("ssh_user", "")).strip()
-
-    # Store Gemini API key in session only if provided (don't overwrite with empty)
-    if data.get("gemini_api_key", "").strip():
-        cfg["gemini_api_key"] = data["gemini_api_key"].strip()
 
     if data.get("auth_type") == "password":
         cfg["ssh_password"]    = data.get("ssh_password", "")
@@ -174,8 +172,8 @@ def api_chat():
     stage   = data.get("stage", "parse")
     params  = data.get("params", {})
     cfg     = get_session_cfg()
-
-    api_key = cfg.get("gemini_api_key", os.getenv("GEMINI_API_KEY", ""))
+    # Always use the app-level Gemini key — user never needs to provide it
+    api_key = GEMINI_API_KEY
 
     if not message and stage == "parse":
         return jsonify({"error": "Empty message."}), 400
