@@ -162,9 +162,10 @@ def parse_user_intent(message: str,
             return params
 
         except requests.HTTPError as e:
-            if e.response is not None and e.response.status_code == 400:
-                return {"parse_error": "Invalid Gemini API key. Check your key in SSH Config."}
-            logger.warning(f"Gemini HTTP error: {e}, falling back to rules")
+            if e.response is not None and e.response.status_code in (400, 403):
+                logger.warning("Gemini API key invalid or quota exceeded — falling back to rule-based parser")
+            else:
+                logger.warning(f"Gemini HTTP error: {e}, falling back to rules")
         except requests.ConnectionError:
             logger.warning("Gemini unreachable, falling back to rules")
         except Exception as e:

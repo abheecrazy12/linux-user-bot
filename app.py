@@ -21,8 +21,9 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# Gemini API key — hardcoded so users never need to enter it
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyAQ.Ab8RN6IWaMHrvSJ47IkFgeaIXfHPRGo1IOI1qiVKpja1mPjtTg")
+# Gemini API key — set GEMINI_API_KEY env var on Render for better NLP
+# Falls back to rule-based parser if not set or invalid — app works either way
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 app = Flask(__name__)
 # Secret key encrypts the session cookie — set a strong value in env for production
