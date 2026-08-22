@@ -11,11 +11,6 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-2.0-flash:generateContent"
-)
-
 SYSTEM_PROMPT = """You are a Linux system administrator assistant.
 Extract Linux user account creation parameters from the user message and return ONLY a valid JSON object. No explanation, no markdown, just raw JSON.
 
@@ -36,8 +31,14 @@ Example output:
 
 
 def _query_gemini(message: str, api_key: str) -> str:
-    """Call Gemini API and return the raw text response."""
-    url  = f"{GEMINI_URL}?key={api_key}"
+    """
+    Call Gemini API and return the raw text response.
+    Supports both AIzaSy... (query param) and AQ... (header-based) key formats.
+    """
+    base_url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        "gemini-2.0-flash:generateContent"
+    )
     body = {
         "contents": [
             {
@@ -47,14 +48,50 @@ def _query_gemini(message: str, api_key: str) -> str:
             }
         ],
         "generationConfig": {
-            "temperature":    0.1,
+            "temperature":     0.1,
             "maxOutputTokens": 512,
         }
     }
-    resp = requests.post(url, json=body, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+
+    # Try query-param style first (AIzaSy... keys)
+    # Then header style (AQ... keys)
+    attempts = [
+        # Attempt 1: key as query param
+        {
+            "url":     f"{base_url}?key={api_key}",
+            "headers": {"Content-Type": "application/json"},
+        },
+        # Attempt 2: key as x-goog-api-key header
+        {
+            "url":     base_url,
+            "headers": {
+                "Content-Type":    "application/json",
+                "x-goog-api-key":  api_key,
+            },
+        },
+    ]
+
+    last_err = None
+    for attempt in attempts:
+        try:
+            resp = requests.post(
+                attempt["url"],
+                json=body,
+                headers=attempt["headers"],
+                timeout=30
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+            last_err = resp
+        except requests.RequestException as e:
+            last_err = e
+            continue
+
+    # All attempts failed — raise so caller can fallback
+    if hasattr(last_err, 'raise_for_status'):
+        last_err.raise_for_status()
+    raise Exception(f"Gemini unreachable: {last_err}")
 
 
 def _extract_json(text: str) -> dict | None:

@@ -21,8 +21,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# Gemini API key — set GEMINI_API_KEY env var on Render for better NLP
-# Falls back to rule-based parser if not set or invalid — app works either way
+# Gemini API key — set GEMINI_API_KEY env var, falls back to rule-based parser
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 app = Flask(__name__)
