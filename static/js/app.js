@@ -71,7 +71,14 @@ async function loadConfig() {
     document.getElementById('cfgPort').value  = data.ssh_port  || '22';
     document.getElementById('cfgUser').value  = data.ssh_user  || '';
     document.getElementById('cfgModel').value = data.ollama_model || 'llama3';
-    if (data.auth_type === 'key') switchAuth('key');
+    if (data.auth_type === 'key') {
+      switchAuth('key');
+      if (data.key_uploaded) {
+        // Show the "already uploaded" state
+        document.getElementById('keyFileLabel').textContent = 'Key already loaded (from previous session)';
+        document.getElementById('keyDropZone').classList.add('has-file');
+      }
+    }
   } catch {}
 }
 
@@ -84,8 +91,9 @@ async function saveConfig() {
     ssh_port:     parseInt(document.getElementById('cfgPort').value) || 22,
     ssh_user:     document.getElementById('cfgUser').value.trim(),
     ssh_password: document.getElementById('cfgPassword').value,
-    ssh_key_path: document.getElementById('cfgKeyPath').value.trim(),
+    ssh_key_path: '',   // no longer used — key is uploaded separately
     ollama_model: document.getElementById('cfgModel').value,
+    auth_type:    document.getElementById('tabKey').classList.contains('active') ? 'key' : 'password',
   };
 
   try {
@@ -112,8 +120,9 @@ async function testSSH() {
     ssh_port:     parseInt(document.getElementById('cfgPort').value) || 22,
     ssh_user:     document.getElementById('cfgUser').value.trim(),
     ssh_password: document.getElementById('cfgPassword').value,
-    ssh_key_path: document.getElementById('cfgKeyPath').value.trim(),
+    ssh_key_path: '',
     ollama_model: document.getElementById('cfgModel').value,
+    auth_type:    document.getElementById('tabKey').classList.contains('active') ? 'key' : 'password',
   };
   await fetch('/api/config', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
 
@@ -139,6 +148,72 @@ function switchAuth(type) {
   document.getElementById('tabPassword').classList.toggle('active', type === 'password');
   document.getElementById('tabKey').classList.toggle('active', type === 'key');
 }
+
+/* ── SSH Key file upload ────────────────────────────────────────── */
+async function handleKeyFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  await uploadKeyFile(file);
+}
+
+async function uploadKeyFile(file) {
+  const zone   = document.getElementById('keyDropZone');
+  const status = document.getElementById('keyFileStatus');
+  const label  = document.getElementById('keyFileLabel');
+  const nameEl = document.getElementById('keyFileName');
+
+  label.textContent = 'Uploading…';
+  zone.classList.add('uploading');
+
+  const formData = new FormData();
+  formData.append('keyfile', file);
+
+  try {
+    const res  = await fetch('/api/config/upload-key', { method: 'POST', body: formData });
+    const data = await res.json();
+
+    if (data.success) {
+      zone.classList.remove('uploading');
+      zone.classList.add('has-file');
+      status.classList.remove('hidden');
+      nameEl.textContent = file.name;
+      document.querySelector('.file-upload-inner').style.display = 'none';
+      showFeedback('configFeedback', 'success', '🔑 ' + data.message);
+      showToast('Key uploaded', 'success');
+    } else {
+      zone.classList.remove('uploading');
+      label.textContent = 'Click to upload or drag & drop';
+      showFeedback('configFeedback', 'error', '❌ ' + data.message);
+    }
+  } catch (e) {
+    zone.classList.remove('uploading');
+    label.textContent = 'Click to upload or drag & drop';
+    showFeedback('configFeedback', 'error', 'Upload failed: ' + e.message);
+  }
+}
+
+function clearKeyFile() {
+  document.getElementById('cfgKeyFile').value = '';
+  document.getElementById('keyFileStatus').classList.add('hidden');
+  document.getElementById('keyDropZone').classList.remove('has-file', 'uploading');
+  document.querySelector('.file-upload-inner').style.display = '';
+  document.getElementById('keyFileLabel').textContent = 'Click to upload or drag & drop';
+  showFeedback('configFeedback', 'info', 'Key removed. You can upload a new one.');
+}
+
+// Drag-and-drop support
+document.addEventListener('DOMContentLoaded', () => {
+  const zone = document.getElementById('keyDropZone');
+  if (!zone) return;
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) uploadKeyFile(file);
+  });
+});
 
 function togglePw(id, btn) {
   const input = document.getElementById(id);
@@ -328,6 +403,23 @@ function appendSuccessMessage(data) {
     .map(d => `<p>${escHtml(d)}</p>`)
     .join('');
 
+  // PPK download button — only shown when keypair was generated
+  const ppkHtml = data.ppk_available ? `
+    <div class="ppk-download-wrap">
+      <div class="ppk-info">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="7" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+        <div>
+          <p class="ppk-title">SSH Private Key Ready</p>
+          <p class="ppk-hint">Download and open in PuTTY / WinSCP to connect as <strong>${escHtml(data.ppk_username)}</strong></p>
+        </div>
+      </div>
+      <a class="btn btn-primary btn-sm ppk-btn" href="/api/download-ppk/${encodeURIComponent(data.ppk_username)}" download="${escHtml(data.ppk_username)}.ppk">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download ${escHtml(data.ppk_username)}.ppk
+      </a>
+      <p class="ppk-warning">⚠️ One-time download — save it securely. The server copy of the private key has been deleted.</p>
+    </div>` : '';
+
   div.innerHTML = `
     <div class="avatar bot-avatar">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
@@ -335,6 +427,7 @@ function appendSuccessMessage(data) {
     <div class="bubble success">
       <p><strong>${markdownLite(escHtml(data.message))}</strong></p>
       <div class="result-list">${detailsHtml}</div>
+      ${ppkHtml}
     </div>
   `;
   wrap.appendChild(div);

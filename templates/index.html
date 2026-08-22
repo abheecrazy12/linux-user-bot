@@ -163,8 +163,22 @@
 
       <div id="authKey" class="auth-panel hidden">
         <div class="form-group full">
-          <label>Private Key Path</label>
-          <input type="text" id="cfgKeyPath" placeholder="/home/user/.ssh/id_rsa" />
+          <label>Private Key File <span class="label-hint">(PEM, OpenSSH, or PPK)</span></label>
+          <div class="file-upload-wrap" id="keyDropZone">
+            <input type="file" id="cfgKeyFile" accept=".pem,.key,.ppk,*" style="display:none" onchange="handleKeyFile(this)" />
+            <div class="file-upload-inner" onclick="document.getElementById('cfgKeyFile').click()">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <p class="file-upload-label" id="keyFileLabel">Click to upload or drag &amp; drop</p>
+              <p class="file-upload-hint">id_rsa, id_ed25519, .pem, .ppk</p>
+            </div>
+            <div class="file-upload-status hidden" id="keyFileStatus">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+              <span id="keyFileName">key loaded</span>
+              <button class="file-clear-btn" onclick="clearKeyFile()" title="Remove key">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

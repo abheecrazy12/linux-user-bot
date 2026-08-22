@@ -5,13 +5,17 @@ Handles chat API, SSH config, NLP parsing, and command execution.
 
 import os
 import logging
-from flask import Flask, render_template, request, jsonify, session
+import tempfile
+import base64
+from flask import Flask, render_template, request, jsonify, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
+import io
 
 from core.nlp_parser import parse_user_intent
 from core.command_builder import build_command_preview, describe_params
 from core.ssh_client import SSHClient
+from core.keygen import generate_keypair_on_server, pem_to_ppk
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -30,6 +34,7 @@ def get_ssh_client() -> SSHClient:
         username=os.getenv("SSH_USER", ""),
         password=os.getenv("SSH_PASSWORD") or None,
         key_path=os.getenv("SSH_KEY_PATH") or None,
+        key_content=os.getenv("SSH_KEY_CONTENT") or None,
     )
 
 def ssh_configured() -> bool:
@@ -50,7 +55,8 @@ def api_config():
         "ssh_host": os.getenv("SSH_HOST", ""),
         "ssh_port": os.getenv("SSH_PORT", "22"),
         "ssh_user": os.getenv("SSH_USER", ""),
-        "auth_type": "key" if os.getenv("SSH_KEY_PATH") else "password",
+        "auth_type": "key" if (os.getenv("SSH_KEY_PATH") or os.getenv("SSH_KEY_CONTENT")) else "password",
+        "key_uploaded": bool(os.getenv("SSH_KEY_CONTENT")),
         "ollama_model": os.getenv("OLLAMA_MODEL", "llama3"),
         "configured": ssh_configured(),
     })
@@ -61,9 +67,9 @@ def api_config_update():
     """Save SSH settings (runtime only — not persisted to .env)."""
     data = request.get_json(force=True)
     updates = {
-        "SSH_HOST": data.get("ssh_host", ""),
-        "SSH_PORT": str(data.get("ssh_port", 22)),
-        "SSH_USER": str(data.get("ssh_user", "")),
+        "SSH_HOST":     data.get("ssh_host", ""),
+        "SSH_PORT":     str(data.get("ssh_port", 22)),
+        "SSH_USER":     str(data.get("ssh_user", "")),
         "SSH_PASSWORD": data.get("ssh_password", ""),
         "SSH_KEY_PATH": data.get("ssh_key_path", ""),
         "OLLAMA_MODEL": data.get("ollama_model", "llama3"),
@@ -73,7 +79,44 @@ def api_config_update():
             os.environ[k] = v
         elif k in os.environ:
             del os.environ[k]
+    # If switching to password auth, clear any uploaded key
+    if data.get("auth_type") == "password":
+        os.environ.pop("SSH_KEY_CONTENT", None)
     return jsonify({"status": "ok", "message": "Configuration updated for this session."})
+
+
+@app.route("/api/config/upload-key", methods=["POST"])
+def api_upload_key():
+    """
+    Accept an SSH private key file upload (multipart/form-data).
+    Stores the key content in memory (env var) — no disk write.
+    Works from phone browsers too since it's a standard file upload.
+    """
+    if "keyfile" not in request.files:
+        return jsonify({"success": False, "message": "No file received."}), 400
+
+    key_file = request.files["keyfile"]
+    key_content = key_file.read().decode("utf-8", errors="replace").strip()
+
+    if not key_content:
+        return jsonify({"success": False, "message": "Uploaded file is empty."}), 400
+
+    # Basic sanity check — must look like a PEM or OpenSSH key
+    valid_headers = (
+        "-----BEGIN RSA PRIVATE KEY-----",
+        "-----BEGIN OPENSSH PRIVATE KEY-----",
+        "-----BEGIN EC PRIVATE KEY-----",
+        "PuTTY-User-Key-File",   # PPK format — paramiko can read PPK v2
+    )
+    if not any(key_content.startswith(h) for h in valid_headers):
+        return jsonify({"success": False, "message": "File doesn't look like a valid SSH private key."}), 400
+
+    # Store in env — will be picked up by get_ssh_client()
+    os.environ["SSH_KEY_CONTENT"] = key_content
+    os.environ.pop("SSH_KEY_PATH", None)      # clear path-based key
+    os.environ.pop("SSH_PASSWORD", None)      # clear password auth
+
+    return jsonify({"success": True, "message": f"Key '{key_file.filename}' loaded successfully."})
 
 
 @app.route("/api/test-ssh", methods=["POST"])
@@ -146,6 +189,7 @@ def api_chat():
             return jsonify({"stage": "error", "message": preview["error"]})
 
         results = []
+        ppk_data = None
         try:
             with get_ssh_client() as ssh:
                 # Run useradd
@@ -171,6 +215,23 @@ def api_chat():
                     else:
                         results.append("✅ Password set successfully.")
 
+                # Generate SSH keypair for the new user
+                if not params.get("system_account"):
+                    kp = generate_keypair_on_server(ssh, params["username"])
+                    if kp["success"]:
+                        results.append("✅ SSH keypair generated and authorized_keys configured.")
+                        # Convert private key PEM → PPK and cache in memory (base64)
+                        try:
+                            ppk_bytes = pem_to_ppk(kp["private_key_pem"])
+                            # Store in app config temporarily keyed by username
+                            app.config[f"ppk_{params['username']}"] = ppk_bytes
+                            ppk_data = params["username"]
+                        except Exception as e:
+                            logger.warning(f"PPK conversion failed: {e}")
+                            results.append(f"⚠️ PPK conversion failed — key not available for download: {e}")
+                    else:
+                        results.append(f"⚠️ SSH keygen failed: {kp['error']}")
+
                 # Verify user exists
                 vcode, vout, _ = ssh.execute(f"id {params['username']}")
                 if vcode == 0:
@@ -183,10 +244,38 @@ def api_chat():
         return jsonify({
             "stage": "success",
             "message": f"User **{params['username']}** has been created successfully! 🎉",
-            "details": results
+            "details": results,
+            "ppk_available": ppk_data is not None,
+            "ppk_username": ppk_data,
         })
 
     return jsonify({"error": "Unknown stage."}), 400
+
+
+@app.route("/api/download-ppk/<username>")
+def download_ppk(username: str):
+    """
+    Serve the cached PPK file for download.
+    The key is held in memory only — disappears on server restart.
+    """
+    import re
+    # Validate username to prevent path traversal
+    if not re.match(r'^[a-z0-9_\-]{1,32}$', username):
+        return jsonify({"error": "Invalid username"}), 400
+
+    ppk_bytes = app.config.get(f"ppk_{username}")
+    if not ppk_bytes:
+        return jsonify({"error": "PPK not found. It may have expired or the server restarted."}), 404
+
+    # Remove from memory after download (one-time download)
+    app.config.pop(f"ppk_{username}", None)
+
+    return send_file(
+        io.BytesIO(ppk_bytes),
+        as_attachment=True,
+        download_name=f"{username}.ppk",
+        mimetype="application/octet-stream",
+    )
 
 
 if __name__ == "__main__":

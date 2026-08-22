@@ -1,9 +1,10 @@
 """
 SSH Client module for executing commands on a remote Linux server.
 Uses paramiko for secure SSH connections with support for
-password and key-based authentication.
+password, key-path, and in-memory key content authentication.
 """
 
+import io
 import paramiko
 import logging
 from typing import Tuple
@@ -13,12 +14,14 @@ logger = logging.getLogger(__name__)
 
 class SSHClient:
     def __init__(self, host: str, port: int, username: str,
-                 password: str = None, key_path: str = None):
+                 password: str = None, key_path: str = None,
+                 key_content: str = None):
         self.host = host
         self.port = port
         self.username = username
         self.password = password
         self.key_path = key_path
+        self.key_content = key_content   # raw PEM or PPK text from file upload
         self._client: paramiko.SSHClient = None
 
     def connect(self) -> None:
@@ -33,12 +36,16 @@ class SSHClient:
             "timeout": 15,
         }
 
-        if self.key_path:
+        if self.key_content:
+            # Load key from in-memory string — works for both PEM and PPK v2
+            pkey = paramiko.RSAKey.from_private_key(io.StringIO(self.key_content))
+            connect_kwargs["pkey"] = pkey
+        elif self.key_path:
             connect_kwargs["key_filename"] = self.key_path
         elif self.password:
             connect_kwargs["password"] = self.password
         else:
-            raise ValueError("Either password or key_path must be provided.")
+            raise ValueError("Provide password, key_path, or key_content.")
 
         self._client.connect(**connect_kwargs)
         logger.info(f"SSH connected to {self.host}:{self.port} as {self.username}")

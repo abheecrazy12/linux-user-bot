@@ -702,3 +702,179 @@ select option { background: var(--bg2); }
   .form-group.full { grid-column: 1; }
   .bubble { max-width: 100%; }
 }
+
+/* ── File Upload Zone ────────────────────────────────────────── */
+.label-hint {
+  font-size: 11px;
+  color: var(--text3);
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+.file-upload-wrap {
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--bg3);
+  transition: border-color var(--transition), background var(--transition);
+  overflow: hidden;
+  position: relative;
+}
+
+.file-upload-wrap.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.file-upload-wrap.has-file {
+  border-style: solid;
+  border-color: var(--success)60;
+  background: #22c55e08;
+}
+
+.file-upload-wrap.uploading {
+  border-color: var(--accent)60;
+  background: var(--accent-glow);
+}
+
+.file-upload-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 28px 20px;
+  cursor: pointer;
+  color: var(--text3);
+  transition: color var(--transition);
+}
+
+.file-upload-inner:hover {
+  color: var(--accent);
+}
+
+.file-upload-inner svg {
+  opacity: 0.6;
+  transition: opacity var(--transition), transform var(--transition);
+}
+
+.file-upload-inner:hover svg {
+  opacity: 1;
+  transform: translateY(-2px);
+}
+
+.file-upload-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text2);
+}
+
+.file-upload-inner:hover .file-upload-label {
+  color: var(--accent);
+}
+
+.file-upload-hint {
+  font-size: 11px;
+  color: var(--text3);
+  font-family: var(--mono);
+}
+
+/* File loaded status bar */
+.file-upload-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  color: var(--success);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.file-upload-status svg {
+  flex-shrink: 0;
+}
+
+.file-upload-status span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.file-clear-btn {
+  background: none;
+  border: none;
+  color: var(--text3);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  transition: color var(--transition), background var(--transition);
+}
+
+.file-clear-btn:hover {
+  color: var(--danger);
+  background: #ef444420;
+}
+
+/* ── PPK Download Card ───────────────────────────────────────── */
+.ppk-download-wrap {
+  margin-top: 16px;
+  background: var(--bg);
+  border: 1px solid var(--accent)30;
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ppk-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  color: var(--accent);
+}
+
+.ppk-info svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.ppk-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 3px;
+}
+
+.ppk-hint {
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.5;
+}
+
+.ppk-btn {
+  align-self: flex-start;
+  text-decoration: none;
+  gap: 8px;
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  50%       { box-shadow: 0 0 0 6px transparent; }
+}
+
+.ppk-warning {
+  font-size: 11px;
+  color: var(--warning);
+  line-height: 1.5;
+  padding: 8px 10px;
+  background: #f59e0b10;
+  border: 1px solid #f59e0b30;
+  border-radius: 6px;
+}
