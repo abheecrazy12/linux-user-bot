@@ -31,7 +31,7 @@ def generate_keypair_on_server(ssh_client, username: str) -> dict:
         f"sudo mkdir -p {ssh_dir}",
         f"sudo chown {username}:{username} {ssh_dir}",
         f"sudo chmod 700 {ssh_dir}",
-        f"sudo ssh-keygen -t rsa -b 4096 -N '' -f {ssh_dir}/id_rsa -C '{username}@server'",
+        f"sudo ssh-keygen -t rsa -b 2048 -N '' -f {ssh_dir}/id_rsa -C '{username}@server'",
         f"sudo cp {ssh_dir}/id_rsa.pub {ssh_dir}/authorized_keys",
         f"sudo chown {username}:{username} {ssh_dir}/authorized_keys {ssh_dir}/id_rsa {ssh_dir}/id_rsa.pub",
         f"sudo chmod 600 {ssh_dir}/authorized_keys {ssh_dir}/id_rsa",
