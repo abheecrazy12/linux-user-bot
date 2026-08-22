@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: linux-user-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: FLASK_SECRET_KEY
+        generateValue: true        # Render auto-generates a secure random value
+      - key: OLLAMA_MODEL
+        value: llama3
+      # Set these in the Render dashboard — do NOT hardcode secrets here:
+      # SSH_HOST, SSH_PORT, SSH_USER, SSH_PASSWORD or SSH_KEY_PATH
+    healthCheckPath: /
